@@ -5,17 +5,23 @@ import { useTournies } from '../Queries';
 function TourniesList() {
   const qres = useTournies();
 
-  if (!qres.data) {
+  if (qres.isLoading) {
     return <p>Loading tournies...</p>;
   }
 
-  if (!qres.data.ok) {
+  if (qres.error) {
+    return <p>Failed to load tournies: {qres.error.message}</p>
+  }
+
+  const data = qres.data!;
+
+  if (!data.ok) {
     return (
       <>
-        <p>{qres.data.message}</p>
+        <p>{data.message}</p>
         {
-          qres.data.errors && qres.data.errors.length > 0
-            ? <ul>{qres.data.errors.map(v => <li>{v}</li>)}</ul>
+          data.errors && data.errors.length > 0
+            ? <ul>{data.errors.map(v => <li>{v}</li>)}</ul>
             : undefined
         }
       </>
@@ -24,7 +30,7 @@ function TourniesList() {
 
   return (
     <ul>
-      {qres.data.list.map(({ name }) => <li>{name}</li>)}
+      {data.list.map(({ name }) => <li>{name}</li>)}
     </ul>
   );
 }
