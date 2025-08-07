@@ -57,10 +57,66 @@ const Tournie_Schema = z.object({
   knockout_games: z.array(z.string().min(1)).optional().default([]),
 }) satisfies { parse(v: any): Omit<Tournie, 'id' | 'ownerId'> };
 
-const server = Bun.serve({
-  routes: {
-    '/api/tournies': {
-      GET: async (req) => {
+type Splat<T> = { [K in keyof T]: T[K] } & unknown;
+
+type PathParams<Path extends string, Params extends Record<string, string> = {}> = Path extends '' | '/'
+  ? Splat<Params>
+  : Path extends `/:${infer Name extends string}/${infer Rest extends string}`
+  ? PathParams<`/${Rest}`, Params & { [K in Name]: string }>
+  : Path extends `/${string}/${infer Next extends string}`
+  ? PathParams<`/${Next}`, Params>
+  : Splat<Params>;
+
+interface Route<Path extends string> {
+  GET?: (request: Request, params: PathParams<Path>) => Response | Promise<Response>;
+  POST?: (request: Request, params: PathParams<Path>) => Response | Promise<Response>;
+}
+type RouteBuilder<R extends Route<string>> = {
+  [K in keyof R as K extends string ? Lowercase<K> : never]-?: (fn: NonNullable<R[K]>) => RouteBuilder<R>;
+} & { build(): R };
+
+type RoutesBuilder<R extends Record<string, Route<string>> = {}> = {
+  add<Path extends `/${string}`>(path: Path, fn: (b: RouteBuilder<Route<Path>>) => Route<Path>): RoutesBuilder<R & { [K in Path]: Route<Path> }>;
+  build(): Splat<R>;
+};
+
+const routes_builder = () => {
+  const routes: Record<string, Route<string>> = {};
+  const builder: RoutesBuilder = {
+    add<Path extends `/${string}`>(path: Path, fn: (b: RouteBuilder<Route<Path>>) => Route<Path>) {
+      routes[path] = fn(route_builder<Path>());
+      return builder as any;
+    },
+    build() {
+      return routes;
+    }
+  };
+  return builder;
+};
+
+const route_builder = <Path extends `/${string}`>() => {
+  const methods = {} as Route<Path>;
+  const builder: RouteBuilder<Route<Path>> = {
+    get(fn) {
+      methods.GET = fn;
+      return builder;
+    },
+    post(fn) {
+      methods.POST = fn;
+      return builder;
+    },
+    build() {
+      return methods;
+    },
+  };
+  return builder;
+};
+
+const routes = routes_builder()
+  .add(
+    '/api/tournies',
+    b => b
+      .get(async (req) => {
         const result = await tryAsync<Response>(async () => {
           const [auth] = await authenticate(req);
           if (auth === false) return Response.json({ message: 'Not authed' }, { status: 401 });
@@ -75,9 +131,8 @@ const server = Bun.serve({
         if (result.ok) return result.value;
         console.error(result.error);
         return Response.json({ message: 'Failed to fetch your tournies' }, { status: 500 })
-      },
-
-      POST: async (req) => {
+      })
+      .post(async (req) => {
         const result = await tryAsync<Response>(async () => {
           const [auth] = await authenticate(req);
           const json_result = await tryAsync(() => req.json());
@@ -126,17 +181,24 @@ const server = Bun.serve({
         });
         if (result.ok) return result.value;
         return Response.json({ message: result.error.message }, { status: 500 })
-      },
-    }
-  },
+      })
+      .build()
+  )
+  .build();
 
-  fetch(req) {
-    const url = new URL(req.url);
-    const pathname = url.pathname;
-    return new Response(`Route ${pathname} not found`, {
-      status: 404,
-    });
+
+type HttpMethod = 'GET' | 'POST';
+
+export default function handler(req: Request) {
+  const url = new URL(req.url);
+  const method = req.method.toUpperCase() as HttpMethod;
+  const pathname = url.pathname;
+  if (pathname in routes) {
+    const uses = routes[pathname as (keyof typeof routes)];
+    if (method in uses) return uses[method]!(req, {});
   }
-});
-export default server.fetch;
 
+  return new Response(`Route ${pathname} not found`, {
+    status: 404,
+  });
+}
