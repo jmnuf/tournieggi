@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+header > nav > *:not(:last-child) {
+  border-right: 1px solid oklch(12.9% 0.042 264.695);
+}
+
+button[component] {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  transition: all 150ms ease-in-out;
+  cursor: pointer;
+}
+
+:not(header) > button[component] {
+  text-decoration: underline;
+}
+
+button[component]:hover {
+  font-weight: bold;
+}
+
