@@ -3,6 +3,7 @@ import { and, eq, } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   type Group,
+  type Tournie,
   db,
   tourniesTable,
   usersTable,
@@ -28,7 +29,17 @@ const clerk = createClerkClient({
   publishableKey: env.VITE_CLERK_PUBLISHABLE_KEY,
 });
 
-const get_user_from_clerk_id = (clerk_id: string) =>
+const authenticate = async (req: Request) => {
+  const status_result = await tryAsync(() => clerk.authenticateRequest(req, {
+    authorizedParties: ['https://tournieggi.jmnuf.app', 'https://jmnuf.app'],
+  }));
+  if (!status_result.ok) return [false] as const;
+  const status = status_result.value;
+  if (!status.isAuthenticated) return [false] as const;
+  return [status.toAuth(), status] as const;
+}
+
+const get_user_id_from_clerk_id = (clerk_id: string) =>
   db.select({ id: usersTable.id })
     .from(usersTable)
     .where(eq(usersTable.clerk_id, clerk_id))
@@ -43,18 +54,17 @@ const Tournie_Schema = z.object({
   name: z.string().min(1),
   teams: z.array(z.string().min(1)).nonempty().refine(arg => new Set(arg)),
   groups: z.array(Group_Schema),
-  knockout_games: z.array(z.string().min(1)).optional(),
-});
+  knockout_games: z.array(z.string().min(1)).optional().default([]),
+}) satisfies { parse(v: any): Omit<Tournie, 'id' | 'ownerId'> };
 
 const server = Bun.serve({
   routes: {
     '/api/tournies': {
       GET: async (req) => {
         const result = await tryAsync<Response>(async () => {
-          const authStatus = await clerk.authenticateRequest(req);
-          if (!authStatus.isAuthenticated) return Response.json({ message: 'Not authed' }, { status: 401 });
-          const auth = authStatus.toAuth();
-          const userId = await get_user_from_clerk_id(auth.userId);
+          const [auth] = await authenticate(req);
+          if (auth === false) return Response.json({ message: 'Not authed' }, { status: 401 });
+          const userId = await get_user_id_from_clerk_id(auth.userId);
 
           const tournies = await db.select({ id: tourniesTable.id, name: tourniesTable.name })
             .from(tourniesTable)
@@ -66,13 +76,14 @@ const server = Bun.serve({
         console.error(result.error);
         return Response.json({ message: 'Failed to fetch your tournies' }, { status: 500 })
       },
+
       POST: async (req) => {
         const result = await tryAsync<Response>(async () => {
-          const authStatus = await clerk.authenticateRequest(req);
+          const [auth] = await authenticate(req);
           const json_result = await tryAsync(() => req.json());
           if (!json_result.ok) return Response.json({ message: 'Body is not json' }, { status: 405 });
           const json = json_result.value;
-          if (!authStatus.isAuthenticated) return Response.json({ message: 'Not authed' }, { status: 401 });
+          if (auth === false) return Response.json({ message: 'Not authed' }, { status: 401 });
           const parse_result = Tournie_Schema.safeParse(json);
           if (parse_result.error) {
             const e = parse_result.error;
@@ -80,8 +91,7 @@ const server = Bun.serve({
             return Response.json({ message: 'Incorrect shape', errors: flat.errors, props: flat.properties }, { status: 400 });
           }
           const data = parse_result.data;
-          const auth = authStatus.toAuth();
-          const userId = await get_user_from_clerk_id(auth.userId);
+          const userId = await get_user_id_from_clerk_id(auth.userId);
 
           const check_result = await tryAsync(
             () =>
