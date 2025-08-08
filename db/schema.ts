@@ -57,7 +57,7 @@ export type User = typeof usersTable['$inferSelect'];
 export const tourniesTable = sqliteTable('tournies', {
   id: uuid_field('id').primaryKey(),
   name: text('name').notNull(),
-  ownerId: text('id').notNull().references(() => usersTable.id),
+  ownerId: uuid('owner_id').notNull().references(() => usersTable.id),
   teams: string_array('teams').notNull().default([]),
   groups: groups_array('groups').notNull().default([]),
   knockout_games: string_array('ladders').notNull().default([]),
