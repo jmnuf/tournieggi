@@ -517,6 +517,7 @@ export default function handler(req: Request) {
     }
   }
 
+  if (pathname.startsWith('/api')) return Response.json({ message: `Route ${pathname} not found` }, { status: 404 });
   return new Response(`Route ${pathname} not found`, {
     status: 404,
   });
