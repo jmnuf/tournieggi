@@ -6,5 +6,8 @@
       "includeFiles": "(db/*.ts|drizzle.config.ts|env.ts)"
     }
   },
-  "rewrites": [{ "source": "/api/(.*)", "destination": "/api/index.ts" }]
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.ts" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }
