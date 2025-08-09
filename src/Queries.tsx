@@ -171,7 +171,7 @@ function useUpdateTournie(t: Update_Tournie) {
 }
 
 async function updateTournie(opt: { id: string, tournie: Update_Tournie }) {
-  const res = await fetch(ApiUrl`/api/tournie/${opt.id}`, { method: 'POST', body: JSON.stringify(opt.tournie) });
+  const res = await fetch(ApiUrl`/tournie/${opt.id}`, { method: 'POST', body: JSON.stringify(opt.tournie) });
   const json = await res.json();
   if (!res.ok) return { ok: false, message: json.message as string } as const;
   return { ok: true, updated: json.updated as Tournie };
