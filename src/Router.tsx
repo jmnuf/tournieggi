@@ -7,9 +7,11 @@ import {
   RouterProvider,
 } from '@tanstack/react-router';
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools';
-
-import HomePage from './pages/Home';
 import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/clerk-react';
+
+import HomePage from './routes/Home';
+import UserPage from './routes/User';
+import TourniePage from './routes/Tournie';
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -21,7 +23,7 @@ const rootRoute = createRootRoute({
           </Link>
         </nav>
         <SignedOut>
-          <SignInButton withSignUp={true} />
+          <SignInButton />
         </SignedOut>
         <SignedIn>
           <UserButton />
@@ -42,7 +44,25 @@ const HomeRoute = createRoute({
   component: HomePage,
 });
 
-const routeTree = rootRoute.addChildren([HomeRoute]);
+const UserRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/u/$username',
+  component: () => {
+    const params = UserRoute.useParams();
+    return <UserPage username={params.username} />;
+  },
+});
+
+const TournieRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/u/$user/$name',
+  component: () => {
+    const params = TournieRoute.useParams();
+    return <TourniePage username={params.user} name={params.name} />
+  },
+});
+
+const routeTree = rootRoute.addChildren([HomeRoute, UserRoute, TournieRoute]);
 
 const router = createRouter({ routeTree });
 
