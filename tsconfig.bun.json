@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": ["ES2023"],
-    "module": "ESNext",
+    "lib": ["ESNext"],
+    "module": "Preserve",
     "skipLibCheck": true,
 
     /* Bundler mode */
@@ -10,6 +10,7 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
+    "esModuleInterop": true,
     "noEmit": true,
 
     /* Linting */
@@ -20,5 +21,5 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["api", "drizzle.config.ts", "env.ts"]
+  "include": ["api", "drizzle.config.ts", "env.ts", "dev.ts"]
 }
