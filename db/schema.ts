@@ -51,7 +51,7 @@ const groups_array = customType<{ data: Group[]; driverData: string; }>({
 export const usersTable = sqliteTable('users', {
   id: uuid_field('id').primaryKey(),
   username: text('username').notNull().unique(),
-  image_url: text('image_url').notNull(),
+  image_url: text('image_url').notNull().default("https://img.clerk.com/eyJ0eXBlIjoiZGVmYXVsdCIsImlpZCI6Imluc18zMTJlV1lVTnFiYXVZaUJKRXpPbHIzemlkenoiLCJyaWQiOiJ1c2VyXzMxNVdNc3h6RDhMZ2xScnBrYko4NWpDVzVNTyJ9"),
 }, t => [index('username_index').on(t.username)]);
 export type User = typeof usersTable['$inferSelect'];
 
@@ -59,9 +59,9 @@ export const tourniesTable = sqliteTable('tournies', {
   id: uuid_field('id').primaryKey(),
   name: text('name').notNull(),
   ownerId: uuid('owner_id').notNull().references(() => usersTable.id),
-  teams: string_array('teams').notNull().default([]),
-  groups: groups_array('groups').notNull().default([]),
-  knockout_games: string_array('ladders').notNull().default([]),
+  teams: string_array('teams').notNull().default('[]' as any),
+  groups: groups_array('groups').notNull().default('[]' as any),
+  knockout_games: string_array('ladders').notNull().default('[]' as any),
 }, t => [
   unique('owner_and_tournie_unique_index').on(t.ownerId, t.name),
   index('owner_index').on(t.ownerId),

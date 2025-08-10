@@ -17,10 +17,6 @@ const clerk = createClerkClient({
   publishableKey: env.VITE_CLERK_PUBLISHABLE_KEY,
 });
 
-const get_clerk_user_by_username = (username: string) =>
-  clerk.users.getUserList({ username: [username] })
-    .then(page => page.data[0] as typeof page.data[number] | undefined);
-
 const authenticate = async (req: Request) => {
   const status_result = await tryAsync(() => clerk.authenticateRequest(req, {
     authorizedParties: ['https://tournieggi.jmnuf.app', 'https://jmnuf.app', 'http://localhost:8080'],
@@ -142,36 +138,29 @@ async function get_user_data_by_id(id: User['id']): Promise<Result<UserData, { c
   ]);
   if (!user_result.ok) return Result.Err({ code: 500, message: user_result.error.message });
   const tbl_user = user_result.value[0];
-  const clerk_result = await tryAsync(() => get_clerk_user_by_username(tbl_user.username));
-  if (!clerk_result.ok) return Result.Err({ code: 500, message: clerk_result.error.message });
-  const clerk_user = clerk_result.value;
-  if (!clerk_user) return Result.Err({ code: 500, message: 'Username not saved in clerk service, contact support' });
-  if (!tbl_user.username) {
-    await tryAsync(
-      () => db.update(usersTable)
-        .set({ username: clerk_user.username! })
-        .where(eq(usersTable.id, tbl_user.id))
-    );
-    tbl_user.username = clerk_user.username!;
-  }
 
   const username = tbl_user.username;
-  const image_url = clerk_user.imageUrl;
+  const image_url = tbl_user.image_url;
   const tournies = tournies_result.ok ? tournies_result.value : [];
   return Result.Ok({ id: tbl_user.id, username, image_url, tournies });
 }
 
 async function get_user_data_by_username(username: string): Promise<Result<UserData, { code: number; message: string }>> {
-  const user_id_result = await tryAsync<User['id'] | undefined>(
-    () => db.select({ id: usersTable.id })
-      .from(usersTable)
-      .where(eq(usersTable.username, username))
-      .then(list => list[0]?.id)
-  );
-  if (!user_id_result.ok) return Result.Err({ code: 500, message: user_id_result.error.message });
-  const user_id = user_id_result.value;
-  if (user_id === undefined) return Result.Err({ code: 400, message: 'Unable to find user' });
-  return await get_user_data_by_id(user_id);
+  const user_result = await tryAsync<User | undefined>(() => db.select()
+    .from(usersTable)
+    .where(eq(usersTable.username, username))
+    .then(list => list[0]));
+  if (!user_result.ok) return Result.Err({ code: 500, message: user_result.error.message });
+  const user = user_result.value;
+  if (user === undefined) return Result.Err({ code: 404, message: 'Unable to find user' });
+
+  const tournies_result = await tryAsync(() => db.select({ id: tourniesTable.id, name: tourniesTable.name })
+    .from(tourniesTable)
+    .where(eq(tourniesTable.ownerId, user.id)));
+  if (!tournies_result.ok) console.error(tournies_result.error);
+  const tournies = tournies_result.ok ? tournies_result.value : [];
+  const image_url = user.image_url;
+  return Result.Ok({ id: user.id, username, image_url, tournies });
 }
 
 const get_username_from_clerk_id = (id: string) =>
