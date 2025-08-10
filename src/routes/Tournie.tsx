@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { useAuth } from '@clerk/clerk-react';
+import { useUser } from '@clerk/clerk-react';
 import { api } from '../Queries';
 import type { TournieData } from '../../api';
 
 export default function TourniePage(props: { username: string; name: string }) {
   const query = api.query.useTournieByUserAndName(props);
-  const userId = useAuth({ treatPendingAsSignedOut: true }).userId;
+  const { user } = useUser();
 
   if (query.isLoading) {
     return (
@@ -49,7 +49,7 @@ export default function TourniePage(props: { username: string; name: string }) {
           </div>
         </div>
 
-        <TeamsListing is_viewer_owner={userId === owner.clerk_id} tournie={data.tournie} />
+        <TeamsListing is_viewer_owner={user?.username === owner.username} tournie={data.tournie} />
       </div>
     </section>
   );
