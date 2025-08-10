@@ -36,6 +36,13 @@
       "when": 1754813577719,
       "tag": "0004_burly_pixie",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1754817235141,
+      "tag": "0005_sloppy_proteus",
+      "breakpoints": true
     }
   ]
 }
