@@ -10,6 +10,7 @@ import {
   usersTable,
 } from '../db';
 import { env } from '../env';
+import { asyncPipe } from '../src/util';
 type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
 const Result = {
   Ok<T, E>(value: T): Result<T, E> {
@@ -40,6 +41,10 @@ const clerk = createClerkClient({
   publishableKey: env.VITE_CLERK_PUBLISHABLE_KEY,
 });
 
+const get_clerk_user_by_username = (username: string) =>
+  clerk.users.getUserList({ username: [username] })
+    .then(page => page.data[0] as typeof page.data[number] | undefined);
+
 const authenticate = async (req: Request) => {
   const status_result = await tryAsync(() => clerk.authenticateRequest(req, {
     authorizedParties: ['https://tournieggi.jmnuf.app', 'https://jmnuf.app', 'http://localhost:8080'],
@@ -49,18 +54,6 @@ const authenticate = async (req: Request) => {
   if (!status.isAuthenticated) return [false] as const;
   return [status.toAuth(), status] as const;
 }
-
-const get_user_id_from_clerk_id = (clerk_id: string) =>
-  db.select({ id: usersTable.id })
-    .from(usersTable)
-    .where(eq(usersTable.clerk_id, clerk_id))
-    .then(users => users[0]?.id)
-
-const get_clerk_id_from_user_id = (user_id: string) =>
-  db.select({ clerk_id: usersTable.clerk_id })
-    .from(usersTable)
-    .where(eq(usersTable.id, user_id as any))
-    .then(list => list[0]?.clerk_id)
 
 const Group_Schema = z.object({
   name: z.string(),
@@ -153,14 +146,13 @@ const route_builder = <Path extends `/${string}`>() => {
 
 export interface UserData {
   id: User['id'];
-  clerk_id: User['clerk_id'];
   username: string;
   image_url: string;
   tournies: Array<{ id: Tournie['id']; name: Tournie['name']; }>;
 }
 
 export interface TournieData extends Tournie {
-  owner: Pick<UserData, 'id' | 'clerk_id' | 'username' | 'image_url'>;
+  owner: Pick<UserData, 'id' | 'username' | 'image_url'>;
 }
 
 async function get_user_data_by_id(id: User['id']): Promise<Result<UserData, { code: number; message: string }>> {
@@ -174,44 +166,58 @@ async function get_user_data_by_id(id: User['id']): Promise<Result<UserData, { c
   ]);
   if (!user_result.ok) return Result.Err({ code: 500, message: user_result.error.message });
   const tbl_user = user_result.value[0];
-  const clerk_id = tbl_user?.clerk_id;
-  if (!clerk_id) return Result.Err({ code: 400, message: 'User not found' });
-  const clerk_result = await tryAsync(() => clerk.users.getUser(clerk_id));
+  const clerk_result = await tryAsync(() => get_clerk_user_by_username(tbl_user.username));
   if (!clerk_result.ok) return Result.Err({ code: 500, message: clerk_result.error.message });
-  const user = clerk_result.value;
-  const username = user.username!;
-  const image_url = user.imageUrl;
+  const clerk_user = clerk_result.value;
+  if (!clerk_user) return Result.Err({ code: 500, message: 'Username not saved in clerk service, contact support' });
+  if (!tbl_user.username) {
+    await tryAsync(
+      () => db.update(usersTable)
+        .set({ username: clerk_user.username! })
+        .where(eq(usersTable.id, tbl_user.id))
+    );
+    tbl_user.username = clerk_user.username!;
+  }
+
+  const username = tbl_user.username;
+  const image_url = clerk_user.imageUrl;
   const tournies = tournies_result.ok ? tournies_result.value : [];
-  return Result.Ok({ id: tbl_user.id, clerk_id, username, image_url, tournies });
+  return Result.Ok({ id: tbl_user.id, username, image_url, tournies });
 }
 
 async function get_user_data_by_username(username: string): Promise<Result<UserData, { code: number; message: string }>> {
-  const list_result = await tryAsync(() => clerk.users.getUserList({ username: [username] }));
-  if (!list_result.ok) return Result.Err({ code: 500, message: list_result.error.message });
-  const list = list_result.value;
-  const user = list.data[0];
-  if (!user) return Result.Err({ code: 400, message: 'No user with provided username' });
-  const clerk_id = user.id;
-
   const user_id_result = await tryAsync<User['id'] | undefined>(
-    () => db.select()
+    () => db.select({ id: usersTable.id })
       .from(usersTable)
-      .where(eq(usersTable.clerk_id, user.id))
+      .where(eq(usersTable.username, username))
       .then(list => list[0]?.id)
   );
-  if (!user_id_result.ok || user_id_result.value === undefined) return Result.Err({ code: 400, message: 'Unable to find user' });
-  const id = user_id_result.value;
+  if (!user_id_result.ok) return Result.Err({ code: 500, message: user_id_result.error.message });
+  const user_id = user_id_result.value;
+  if (user_id === undefined) return Result.Err({ code: 400, message: 'Unable to find user' });
+  return await get_user_data_by_id(user_id);
+}
 
-  const tournies_result = await tryAsync(
-    () => db.select({ id: tourniesTable.id, name: tourniesTable.name })
-      .from(tourniesTable)
-      .where(eq(tourniesTable.ownerId, id))
+const get_username_from_clerk_id = (id: string) =>
+  asyncPipe(
+    clerk.users.getUser(id),
+    user => user.username!
   );
 
-  const image_url = user.imageUrl;
-  const tournies = tournies_result.ok ? tournies_result.value : [];
-  return Result.Ok({ id, clerk_id, username, image_url, tournies });
-}
+const get_user_from_clerk_id = <TKeys extends Array<keyof User>>(id: string, keys: TKeys): Promise<Splat<Pick<User, TKeys[number]>> | undefined> =>
+  asyncPipe(
+    get_username_from_clerk_id(id),
+    (username) =>
+      db.select(
+        keys.reduce((acc, k) => {
+          (acc as any)[k] = usersTable[k];
+          return acc;
+        }, {} as { [K in TKeys[number]]: (typeof usersTable)[K] })
+      )
+        .from(usersTable)
+        .where(eq(usersTable.username, username))
+        .then(list => list[0] as any),
+  );
 
 const routes = routes_builder()
   .add(
@@ -221,7 +227,21 @@ const routes = routes_builder()
         const result = await tryAsync<Response>(async () => {
           const [auth] = await authenticate(req);
           if (auth === false) return Response.json({ message: 'Not authed' }, { status: 401 });
-          const userId = await get_user_id_from_clerk_id(auth.userId);
+
+          const clerk_user_result = await tryAsync(() => clerk.users.getUser(auth.userId));
+          if (!clerk_user_result.ok) return Response.json({ message: clerk_user_result.error.message }, { status: 500 });
+          const username = clerk_user_result.value.username!;
+
+          const db_id_result = await tryAsync(
+            () =>
+              db.select({ id: usersTable.id })
+                .from(usersTable)
+                .where(eq(usersTable.username, username))
+                .then(list => list[0]?.id as User['id'] | undefined)
+          );
+          if (!db_id_result.ok) return Response.json({ message: db_id_result.error.message }, { status: 500 });
+          const userId = db_id_result.value;
+          if (!userId) return Response.json({ message: `No saved user with username ${username}` }, { status: 400 });
 
           const tournies = await db.select({ id: tourniesTable.id, name: tourniesTable.name })
             .from(tourniesTable)
@@ -233,6 +253,7 @@ const routes = routes_builder()
         console.error(result.error);
         return Response.json({ message: 'Failed to fetch your tournies' }, { status: 500 })
       })
+
       .post(async (req) => {
         const result = await tryAsync<Response>(async () => {
           const [auth] = await authenticate(req);
@@ -247,13 +268,19 @@ const routes = routes_builder()
             return Response.json({ message: 'Incorrect shape', errors: flat.errors, props: flat.properties }, { status: 400 });
           }
           const data = parse_result.data;
-          const userId = await get_user_id_from_clerk_id(auth.userId);
+
+          const user_result = await tryAsync(
+            () => get_user_from_clerk_id(auth.userId, ['id', 'username'])
+          );
+          if (!user_result.ok) return Response.json({ message: user_result.error.message }, { status: 500 });
+          const user = user_result.value;
+          if (!user) return Response.json({ message: 'No user found' }, { status: 400 });
 
           const check_result = await tryAsync(
             () =>
               db.select({ id: tourniesTable.id })
                 .from(tourniesTable)
-                .where(and(eq(tourniesTable.name, data.name), eq(tourniesTable.ownerId, userId)))
+                .where(and(eq(tourniesTable.name, data.name), eq(tourniesTable.ownerId, user.id)))
           );
           if (check_result.ok) {
             if (check_result.value.length > 0) {
@@ -261,14 +288,18 @@ const routes = routes_builder()
             }
           }
 
-          const insert_result = await tryAsync(() => db.insert(tourniesTable)
-            .values({
-              ownerId: userId,
-              name: data.name,
-              groups: data.groups,
-              teams: data.teams,
-              knockout_games: data.knockout_games ?? [],
-            }).returning({ id: tourniesTable.id }));
+          const insert_result = await tryAsync(
+            () =>
+              db.insert(tourniesTable)
+                .values({
+                  ownerId: user.id,
+                  name: data.name,
+                  groups: data.groups,
+                  teams: data.teams,
+                  knockout_games: data.knockout_games ?? [],
+                })
+                .returning({ id: tourniesTable.id })
+          );
           if (!insert_result.ok) {
             return Response.json({ message: 'Failed to create tournie: ' + insert_result.error.message }, { status: 500 });
           }
@@ -294,8 +325,8 @@ const routes = routes_builder()
         if (!user_result.ok) return Response.json({ message: user_result.error.message }, { status: user_result.error.code });
         const user = user_result.value;
 
-        const t = user.tournies.find(t => t.name == params.tournie_name);
-        if (!t) return Response.json({ message: `No tournie with name ${params.tournie_name} with owner ${params.username} was found` }, { status: 400 });
+        const t = user.tournies.find(t => t.name === params.tournie_name);
+        if (!t) return Response.json({ message: `No tournie with name ${params.tournie_name} with owner ${params.username} was found` }, { status: 404 });
 
         const select_result = await tryAsync<Tournie>(
           () => db.select()
@@ -309,8 +340,7 @@ const routes = routes_builder()
         const tournie: TournieData = Object.assign({
           owner: {
             id: user.id,
-            clerk_id: user.clerk_id,
-            username: user.username!,
+            username: user.username,
             image_url: user.image_url,
           },
         } satisfies Omit<TournieData, keyof typeof data>, data);
@@ -339,37 +369,40 @@ const routes = routes_builder()
         if (!data) {
           return Response.json({ message: 'Tournie with given id does not exist' }, { status: 200 });
         }
-        const clerk_id = await get_clerk_id_from_user_id(data.ownerId);
-        const user = await clerk.users.getUser(clerk_id);
+        const user_result = await tryAsync<User | undefined>(
+          () =>
+            db.select()
+              .from(usersTable)
+              .where(eq(usersTable.id, data.ownerId))
+              .then(list => list[0])
+        );
+        if (!user_result.ok) return Response.json({ message: user_result.error.message }, { status: 500 });
+        const user = user_result.value;
+        if (!user) return Response.json({ message: 'No user found with id: ' + data.ownerId }, { status: 400 });
+
         const tournie: TournieData = Object.assign({
           owner: {
-            id: data.ownerId,
-            clerk_id: user.id,
-            username: user.username!,
-            image_url: user.imageUrl,
+            id: user.id,
+            username: user.username,
+            image_url: user.image_url,
           },
         } satisfies Omit<TournieData, keyof typeof data>, data);
         return Response.json({ tournie });
       })
 
       .post(async (req, params) => {
-        const json_result = await tryAsync(async () => Tournie_Schema.parse(await req.json()));
+        const json_result = await tryAsync<z.infer<typeof Tournie_Schema>>(() => req.json().then(data => Tournie_Schema.parse(data)));
         if (!json_result.ok) return Response.json({ message: json_result.error.message }, { status: 400 });
         const json = json_result.value;
 
         const [auth] = await authenticate(req);
         if (auth === false) return Response.json({ message: 'Not authenticated' }, { status: 401 });
 
-        const clerk_id = auth.userId;
-        const ownerId_result = await tryAsync(
-          () =>
-            db.select({ id: usersTable.id })
-              .from(usersTable)
-              .where(eq(usersTable.clerk_id, clerk_id))
-              .then(list => list[0]?.id)
+        const owner_id_result = await tryAsync(
+          () => get_user_from_clerk_id(auth.userId, ['id']).then(t => t?.id)
         );
-        if (!ownerId_result.ok) return Response.json({ message: ownerId_result.error.message }, { status: 500 });
-        const ownerId = ownerId_result.value;
+        if (!owner_id_result.ok) return Response.json({ message: owner_id_result.error.message }, { status: 500 });
+        const ownerId = owner_id_result.value;
         if (!ownerId) return Response.json({ message: 'Invalid user auth' }, { status: 400 });
 
         const id = params.id;
@@ -378,7 +411,7 @@ const routes = routes_builder()
           const count_result = await tryAsync(
             () => db.$count(db.select()
               .from(tourniesTable)
-              .where(and(eq(tourniesTable.id, id as any), eq(tourniesTable.ownerId, ownerId))))
+              .where(and(eq(tourniesTable.id, id as Tournie['id']), eq(tourniesTable.ownerId, ownerId))))
           );
           if (!count_result.ok) return Response.json({ message: 'Failed to check if tournie exists' }, { status: 500 });
           const count = count_result.value;
@@ -411,16 +444,11 @@ const routes = routes_builder()
         const [auth] = await authenticate(req);
         if (auth === false) return Response.json({ message: 'Not signed in' }, { status: 401 });
 
-        const clerk_id = auth.userId;
-        const ownerId_result = await tryAsync(
-          () =>
-            db.select({ id: usersTable.id })
-              .from(usersTable)
-              .where(eq(usersTable.clerk_id, clerk_id))
-              .then(list => list[0]?.id)
-        );
-        if (!ownerId_result.ok) return Response.json({ message: ownerId_result.error.message }, { status: 500 });
-        const ownerId = ownerId_result.value;
+        const user_result = await tryAsync(() => get_user_from_clerk_id(auth.userId, ['id', 'username']));
+        if (!user_result.ok) return Response.json({ message: user_result.error.message }, { status: 500 });
+        const user = user_result.value;
+        if (!user) return Response.json({ message: 'Authed into a user outside of the system' });
+        const ownerId = user.id;
         if (!ownerId) return Response.json({ message: 'Invalid user auth' }, { status: 400 });
 
         const insert_result = await tryAsync<Tournie['id']>(
@@ -445,13 +473,7 @@ const routes = routes_builder()
         const query = url.searchParams;
         const username = query.get('username');
         let userId = query.get('id') as User['id'] | undefined;
-        const clerkId = query.get('clerkId');
-        if (!userId && !username && !clerkId) return Response.json({ message: 'No way to search for a user' });
-
-        if (clerkId && !userId) {
-          const id = await get_user_id_from_clerk_id(clerkId);
-          userId = id;
-        }
+        if (!userId && !username) return Response.json({ message: 'No way to search for a user' });
 
         if (userId) {
           const result = await get_user_data_by_id(userId);

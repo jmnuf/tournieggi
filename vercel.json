@@ -3,7 +3,7 @@
   "functions": {
     "api/index.ts": {
       "runtime": "@godsreveal/vercel-bun@0.2.4",
-      "includeFiles": "(db/*.ts|drizzle.config.ts|env.ts)"
+      "includeFiles": "(db/*.ts|drizzle.config.ts|env.ts|src/util.ts)"
     }
   },
   "rewrites": [

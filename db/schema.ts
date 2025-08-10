@@ -38,7 +38,7 @@ export type Group = {
 
 const goals_array = customType<{ data: Goal[]; driverData: string; }>({
   dataType: () => 'text',
-  fromDriver: (v): Goal[] => v && typeof v == 'string' ? JSON.parse(v) : [],
+  fromDriver: (v): Goal[] => v ? JSON.parse(v) : [],
   toDriver: (value) => JSON.stringify(value),
 });
 
@@ -50,8 +50,9 @@ const groups_array = customType<{ data: Group[]; driverData: string; }>({
 
 export const usersTable = sqliteTable('users', {
   id: uuid_field('id').primaryKey(),
-  clerk_id: text('clerk_id').notNull().unique(),
-}, t => [index('clerk_user_index').on(t.clerk_id)]);
+  username: text('username').notNull().unique(),
+  image_url: text('image_url').notNull(),
+}, t => [index('username_index').on(t.username)]);
 export type User = typeof usersTable['$inferSelect'];
 
 export const tourniesTable = sqliteTable('tournies', {
