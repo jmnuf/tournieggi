@@ -1,3 +1,33 @@
+export type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
+export const Result = {
+  Ok<T, E>(value: T): Result<T, E> {
+    return { ok: true, value };
+  },
+  Err<T, E>(error: E): Result<T, E> {
+    return { ok: false, error };
+  },
+} as const;
+
+export const trySync = <T>(fn: () => T): Result<T, Error> => {
+  try {
+    const value = fn();
+    return { ok: true, value };
+  } catch (e) {
+    if (e instanceof Error) return { ok: false, error: e };
+    return { ok: false, error: new Error('Unexpected irregular failure', { cause: e }) };
+  }
+};
+
+export const tryAsync = async <T>(fn: () => Promise<T>): Promise<Result<T, Error>> => {
+  try {
+    const value = await fn();
+    return Result.Ok(value);
+  } catch (e) {
+    if (e instanceof Error) return Result.Err(e);
+    const error = new Error('Unexpected irregular failure', { cause: e });
+    return Result.Err(error);;
+  }
+};
 
 type AsyncPipeTo<From, To> = (arg: Awaited<From>) => To;
 

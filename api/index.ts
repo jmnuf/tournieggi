@@ -10,31 +10,7 @@ import {
   usersTable,
 } from '../db';
 import { env } from '../env';
-import { asyncPipe } from '../src/util';
-type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
-const Result = {
-  Ok<T, E>(value: T): Result<T, E> {
-    return { ok: true, value };
-  },
-  Err<T, E>(error: E): Result<T, E> {
-    return { ok: false, error };
-  },
-} as const;
-
-// const trySync = <T>(fn: () => T): Result<T, Error> => {
-//   try {
-//     const value = fn();
-//     return { ok: true, value };
-//   } catch (e) {
-//     if (e instanceof Error) return { ok: false, error: e };
-//     return { ok: false, error: new Error('Unexpected irregular failure', { cause: e }) };
-//   }
-// };
-
-const tryAsync = <TRet>(fn: () => Promise<TRet>): Promise<Result<TRet, Error>> =>
-  fn()
-    .then(value => ({ ok: true, value } as const))
-    .catch(e => ({ ok: false, error: e instanceof Error ? e : new Error('Unexpected irregular failure', { cause: e }) } as const));
+import { asyncPipe, tryAsync, Result } from '../src/util';
 
 const clerk = createClerkClient({
   secretKey: env.CLERK_SECRET_KEY,
