@@ -96,7 +96,7 @@ function TeamsListing(props: { is_viewer_owner?: boolean; tournie: TournieData; 
           }, {} as Record<string, string[]>));
 
           setGroups(new_groups);
-          api.mut.updateTournie({ id: tournie_id, tournie: { ...props.tournie, groups: new_groups } })
+          api.mut.updateTournie({ id: tournie_id, tournie: { groups: new_groups } })
             .then(result => {
               if (result.ok) {
                 setGroups(result.updated.groups);
@@ -107,7 +107,7 @@ function TeamsListing(props: { is_viewer_owner?: boolean; tournie: TournieData; 
             })
             .catch((error: Error) => {
               setGroups(prev.groups);
-              alert(error.message);
+              alert('Failed to update groups: ' + error.message);
             });
         }}>Randomize Groups</button>}
         <ul className="list-disc pl-4">

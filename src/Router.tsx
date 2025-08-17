@@ -12,6 +12,7 @@ import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/clerk-reac
 import HomePage from './routes/Home';
 import UserPage from './routes/User';
 import TourniePage from './routes/Tournie';
+import CreateTourniePage from './routes/CreateTournie';
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -62,7 +63,18 @@ const TournieRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([HomeRoute, UserRoute, TournieRoute]);
+const CreateTournieRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/tournie/new',
+  component: CreateTourniePage,
+});
+
+const routeTree = rootRoute.addChildren([
+  HomeRoute,
+  UserRoute,
+  TournieRoute,
+  CreateTournieRoute,
+]);
 
 const router = createRouter({ routeTree });
 

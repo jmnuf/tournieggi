@@ -1,9 +1,15 @@
-import { QueryClient, QueryClientProvider, useMutation, useQuery } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { useAuth } from '@clerk/clerk-react';
 import { env } from '../env';
 import type { ReactNode } from 'react';
 import type { Tournie } from '../db';
-import type { UserData, TournieData, Update_Tournie } from '../api';
+import type {
+  UserData,
+  TournieData,
+  Update_Tournie,
+  Insert_Tournie,
+} from '../api';
+import { Result, tryAsync } from './util';
 
 const client = new QueryClient();
 const API_BASE_URL = env.VITE_API_URL ?? '';
@@ -143,38 +149,22 @@ const useUserDataByUsername = (username: string) => useQuery({
   },
 }) as UsedQuery<{ ok: false; message: string } | { ok: true, user: UserData }>;
 
-function useUpdateTournie(t: Update_Tournie) {
-  const { getToken } = useAuth();
-
-  return useMutation({
-    mutationKey: ['tournie:set(group)', t.name],
-    mutationFn: async () => {
-      const token = await getToken();
-      const res = await fetch(ApiUrl`/tournie`, {
-        method: 'POST',
-        body: JSON.stringify(t),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (!res.ok) {
-        const json: { message: string } = await res.json();
-        return { ok: false as const, message: json.message };
-      }
-
-      const json: { updated: Tournie } = await res.json();
-      return { ok: true as const, updated: json.updated };
-    },
-  });
-}
-
 async function updateTournie(opt: { id: string, tournie: Update_Tournie }) {
   const res = await fetch(ApiUrl`/tournie/${opt.id}`, { method: 'POST', body: JSON.stringify(opt.tournie) });
   const json = await res.json();
   if (!res.ok) return { ok: false, message: json.message as string } as const;
   return { ok: true, updated: json.updated as Tournie };
+}
+
+async function createTournie(opt: { getToken: () => Promise<string>; data: Insert_Tournie }): Promise<Result<Tournie['id'], string>> {
+  const token_result = await tryAsync(opt.getToken);
+  if (!token_result.ok) return Result.Err(token_result.error.message);
+  const fetch_result = await tryAsync(() => fetch(ApiUrl`/tournie`, { method: 'POST', body: JSON.stringify({ data: opt.data }) }));
+  if (!fetch_result.ok) return Result.Err(fetch_result.error.message);
+  const res = fetch_result.value;
+  const json = await res.json();
+  if (!res.ok) return Result.Err(json.message as string);
+  return Result.Ok(json.id as Tournie['id']);
 }
 
 export const api = {
@@ -188,8 +178,8 @@ export const api = {
   },
 
   mut: {
-    useUpdateTournie,
     updateTournie,
+    createTournie,
   },
 } as const;
 

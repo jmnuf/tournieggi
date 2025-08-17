@@ -38,7 +38,8 @@ const Tournie_Schema = z.object({
   groups: z.array(Group_Schema),
   knockout_games: z.array(z.string().min(1)).optional().default([]),
 }) satisfies { parse(v: any): Omit<Tournie, 'id' | 'ownerId'> };
-export type Update_Tournie = z.infer<typeof Tournie_Schema>;
+export type Insert_Tournie = z.infer<typeof Tournie_Schema>
+export type Update_Tournie = z.infer<ReturnType<typeof Tournie_Schema['partial']>>;
 
 type Splat<T> = { [K in keyof T]: T[K] } & unknown;
 
@@ -174,14 +175,11 @@ const get_user_from_clerk_id = <TKeys extends Array<keyof User>>(id: string, key
     get_username_from_clerk_id(id),
     (username) =>
       db.select(
-        keys.reduce((acc, k) => {
-          (acc as any)[k] = usersTable[k];
-          return acc;
-        }, {} as { [K in TKeys[number]]: (typeof usersTable)[K] })
-      )
-        .from(usersTable)
-        .where(eq(usersTable.username, username))
-        .then(list => list[0] as any),
+        keys.reduce(
+          (acc, k) => { (acc as any)[k] = usersTable[k]; return acc; },
+          {} as { [K in TKeys[number]]: (typeof usersTable)[K] })
+      ).from(usersTable).where(eq(usersTable.username, username)),
+    (list) => list[0] as any,
   );
 
 const routes = routes_builder()
@@ -220,19 +218,26 @@ const routes = routes_builder()
       })
 
       .post(async (req) => {
+        const Insert_Schema = z.object({
+          data: Tournie_Schema,
+        });
+
         const result = await tryAsync<Response>(async () => {
           const [auth] = await authenticate(req);
-          const json_result = await tryAsync(() => req.json());
-          if (!json_result.ok) return Response.json({ message: 'Body is not json' }, { status: 405 });
-          const json = json_result.value;
           if (auth === false) return Response.json({ message: 'Not authed' }, { status: 401 });
-          const parse_result = Tournie_Schema.safeParse(json);
+          const json_result = await tryAsync(async () => req.json());
+          if (!json_result.ok) return Response.json({ message: 'Body is not valid json: ' + json_result.error.message }, { status: 400 });
+          const json = json_result.value;
+          if (!json || typeof json != 'object' || !('data' in json)) {
+            return Response.json({ message: 'Missing data to insert' }, { status: 400 });
+          }
+          const parse_result = Insert_Schema.safeParse(json);
           if (parse_result.error) {
             const e = parse_result.error;
             const flat = z.treeifyError(e);
             return Response.json({ message: 'Incorrect shape', errors: flat.errors, props: flat.properties }, { status: 400 });
           }
-          const data = parse_result.data;
+          const { data } = parse_result.data;
 
           const user_result = await tryAsync(
             () => get_user_from_clerk_id(auth.userId, ['id', 'username'])
@@ -356,9 +361,11 @@ const routes = routes_builder()
       })
 
       .post(async (req, params) => {
-        const json_result = await tryAsync<z.infer<typeof Tournie_Schema>>(() => req.json().then(data => Tournie_Schema.parse(data)));
+        const Request_Schema = Tournie_Schema.partial();
+        type Request_Json_Schema = z.infer<typeof Request_Schema>;
+        const json_result = await tryAsync<Request_Json_Schema>(() => req.json().then(data => Request_Schema.parse(data)));
         if (!json_result.ok) return Response.json({ message: json_result.error.message }, { status: 400 });
-        const json = json_result.value;
+        const data = json_result.value;
 
         const [auth] = await authenticate(req);
         if (auth === false) return Response.json({ message: 'Not authenticated' }, { status: 401 });
@@ -386,7 +393,7 @@ const routes = routes_builder()
         const update_result = await tryAsync<Tournie>(
           () =>
             db.update(tourniesTable)
-              .set(Object.assign({ ownerId }, json))
+              .set(Object.assign({ ownerId }, data))
               .returning()
               .then(list => list[0])
         );
